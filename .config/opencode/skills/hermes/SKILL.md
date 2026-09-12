@@ -238,7 +238,27 @@ Enable `platforms.discord.enabled: true` in `config.yaml`. Verify via the gatewa
 ### 3.3 WhatsApp (Baileys bridge — needs Node; works via Web pairing)
 - No API key needed — you pair the agent's WhatsApp Web session by scanning a QR code on your phone.
 - Activate with `WHATSAPP_ENABLED=true`, add your number to `WHATSAPP_ALLOWED_USERS` (E.164 format, e.g. `+521234567890`).
-- First start needs one interactive step (QR scan) that `hermes gateway restart` surfaces in the log; less scriptable than Telegram/Discord. Only choose if Telegram/Discord are a problem.
+- **The native pairing wizard is BROKEN on this PC**: `hermes whatsapp` / the desktop app promise a QR in a "new terminal window" that never opens, so you get stuck with nothing to scan. **Do NOT run the interactive wizard.** Pair from opencode instead (below) — it renders the QR right here so the scan step completes.
+
+**opencode QR pairing (workaround that works):**
+1. **Present BOTH modes and let the user choose** (the native wizard does this — the opencode wizard must too):
+   - **Separate bot number** (recommended for a bot): people message a dedicated number; needs a 2nd SIM / WhatsApp Business number.
+   - **Personal number (self-chat)**: the user messages themselves to talk to the agent.
+   Set the choice: `WHATSAPP_MODE=bot` or `WHATSAPP_MODE=self-chat` in `%LOCALAPPDATA%\hermes\.env`.
+2. **Phone (allowlist): ask manually with an example** so it's entered correctly:
+   - Prompt: `Phone number that controls the PC? Format: <country code><area><number>, no dashes/spaces — e.g. +521234567890 (Mexico).`
+   - Validate: strip spaces/dashes, must start with `+` followed by 9-15 digits; if invalid, ask again.
+   - Write `WHATSAPP_ALLOWED_USERS=<that number>` to `.env`. (In `bot` mode it's comma-separated numbers or `*`.)
+3. **Render the QR inside opencode** (no new terminal, no TTY needed):
+   ```
+   powershell -NoProfile -Command "$env:WHATSAPP_PAIR_TTL='180'; & \"$env:LOCALAPPDATA\hermes\hermes-agent\.venv\Scripts\python.exe\" -X utf8 \"C:\Users\Oblivion\.config\opencode\skills\hermes\whatsapp_qr.py\""
+   ```
+   The script starts the bridge in `--pair-json` mode, prints a compact ASCII QR in the terminal, and waits (default 180s; `WHATSAPP_PAIR_TTL` overrides). Timeout can be raised for slow phones: `WHATSAPP_PAIR_TTL='600'`.
+4. **User scans**: phone → WhatsApp → Settings → Linked Devices → **Link a Device**, then scan the QR rendered above. On success `creds.json` is saved and the script exits 0.
+5. **Only now enable** (matches upstream: never leave `WHATSAPP_ENABLED=true` unpaired — every gateway start would burn 30s+ on a phantom bridge):
+   - Append `WHATSAPP_ENABLED=true` to the `.env` (keep the `WHATSAPP_MODE` / `WHATSAPP_ALLOWED_USERS` lines from steps 1-2).
+   - `hermes gateway restart`, then tail `bridge.log`: `%LOCALAPPDATA%\hermes\whatsapp\bridge.log` for `Bridge started on port 3000` and the gateway log for `[WhatsApp] Bridge ready (status: connected)`.
+6. Troubleshooting: `creds.json` never appears → re-run step 3 with a fresh QR (QRs expire ~20s after display, but the bridge regenerates until TTL). Nothing printed at all → Node missing (`node -v`) or bridge deps missing (`%LOCALAPPDATA%\hermes\hermes-agent\scripts\whatsapp-bridge\node_modules`); the script installs deps on first run.
 
 ### 3.4 Slack (workspace, not phone-first)
 `.env`: `SLACK_BOT_TOKEN=xoxb-...` and `SLACK_ALLOWED_USERS=<your-id>`. Enable `platforms.slack.enabled: true`. (App manifest needed in Slack; see hermes Gateway setup for the scopes.)
@@ -332,6 +352,7 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\hermes"  # optional, to nuke data
 - `hermes: command not found` → use `& "$env:LOCALAPPDATA\hermes\bin\hermes.exe"` directly.
 - Installer: `Environment variable name or value is too long` → User PATH too long; use manual install §1b.
 - `NoConsoleScreenBufferError` / TUI crash in this shell → use `chat -q`, never `hermes -c`/plain `chat`.
+- WhatsApp QR never appears / wizard "opens a new terminal window" that never opens → the native pairing UI is broken here; use the opencode inline QR renderer (§3.3 step 3) instead of `hermes whatsapp`.
 - `opencode-go` model returns 429/401 despite the key working in `/models` → **check `hermes auth list` for `rate-limited GoUsageLimitError (429) (Nh left)`** (quota exhausted, resets ~1 day) vs truly no subscription; either way switch to `opencode-free`.
 - Slow replies → split the turn (log): model latency ≈ `API call #N ... latency=Xs`; tool latency ≈ `tool X completed (Ns)`. Model-dominated → `ling-3.0-flash-fin-free` + session reset; browser-dominated → inherent, no fix.
 - `ling-3.0-flash-fin-free` gives `503 Endpoint is unavailable` → bursty upstream; auto-retried + falls back to nemotron. Fine if the fallback chain is sane (§2d).
@@ -339,3 +360,37 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\hermes"  # optional, to nuke data
 - `big-pickle` / `laguna-s-2.1-free` 429 for non-opencode-CLI → UA-gated; never pick them for Hermes.
 - Antivirus flags `uv.exe` → false positive, whitelist `%LOCALAPPDATA%\hermes\bin`.
 - Never store API keys / bot tokens in chat or any log the skill writes — only in `%LOCALAPPDATA%\hermes\.env`.
+
+## 8. Setup completo de control de PC (Browser + Visión + Computer Use)
+
+Para que Hermes controle tu navegador, haga clicks, lea pantalla y actúe por Telegram/Discord/WhatsApp sin "tonterías":
+
+1. **Modelo con Visión nativa por defecto**:
+   En `config.yaml`:
+   ```yaml
+   model:
+     provider: opencode-free
+     default: nemotron-3-ultra-free
+   ```
+   *(No usar ling-3.0-flash-fin-free para tareas de navegador ya que no soporta visión nativa).*
+
+2. **Computer Use (cua-driver)**:
+   ```powershell
+   & "$env:LOCALAPPDATA\hermes\bin\hermes.exe" computer-use install
+   ```
+   *(Permite capturar escritorio y hacer clicks/movimientos).*
+
+3. **Browser Automation**:
+   Los tools de navegador (`browser_navigate`, `browser_click`, `browser_snapshot`, `browser_vision`) se activan automáticamente vía `agent-browser` y Playwright Chromium.
+
+4. **Habilitar todos los Toolsets clave**:
+   ```powershell
+   & "$env:LOCALAPPDATA\hermes\bin\hermes.exe" tools enable browser terminal file code_execution vision computer_use memory skills todo delegation cronjob session_search clarify search web tts image_gen
+   ```
+
+5. **Reiniciar y limpiar sesión DM**:
+   Cada vez que cambies el modelo, borra la sesión antigua de Telegram para que coja las capacidades nuevas:
+   ```powershell
+   & "$env:LOCALAPPDATA\hermes\bin\hermes.exe" sessions delete --yes <session_id>
+   & "$env:LOCALAPPDATA\hermes\bin\hermes.exe" gateway restart
+   ```
