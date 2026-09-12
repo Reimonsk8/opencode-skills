@@ -1,6 +1,6 @@
 ---
 name: agent-harness
-description: Use when the user runs /agent-harness or asks to create agents, bootstrap an agent harness, set up AGENTS.md, or generate an adversarial coding-agent workflow for a new or existing repository. Works in ANY repo from scratch: inspects the actual stack and scaffolds .agent/ (roles, adversaries, workflows, protocols, quality bar) + AGENTS.md.
+description: "Use when the user runs /agent-harness or asks to create agents, bootstrap an agent harness, set up AGENTS.md, or generate an adversarial coding-agent workflow for a new or existing repository. Works in ANY repo from scratch: inspects the actual stack and scaffolds .agent/ (roles, adversaries, workflows, protocols, quality bar) + AGENTS.md."
 ---
 
 # Agent Harness bootstrap
